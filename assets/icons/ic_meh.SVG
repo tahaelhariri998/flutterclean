@@ -1,0 +1,7 @@
+<?xml version="1.0"?>
+<svg xmlns="http://www.w3.org/2000/svg" xmlns:android="http://schemas.android.com/apk/res/android" width="24dp" height="24dp" viewportWidth="24" viewportHeight="24">
+	<path fill="#00000000" d="M12,21C16.971,21 21,16.971 21,12C21,7.029 16.971,3 12,3C7.029,3 3,7.029 3,12C3,16.971 7.029,21 12,21Z" stroke-width="2" stroke="#000000" strokeLineCap="round" strokeLineJoin="round"/>
+	<path fill="#00000000" d="M8,14L16,14" stroke-width="2" stroke="#000000" strokeLineCap="round" strokeLineJoin="round"/>
+	<path fill="#00000000" d="M9,9L9.01,9" stroke-width="2" stroke="#000000" strokeLineCap="round" strokeLineJoin="round"/>
+	<path fill="#00000000" d="M15,9L15.01,9" stroke-width="2" stroke="#000000" strokeLineCap="round" strokeLineJoin="round"/>
+</svg>

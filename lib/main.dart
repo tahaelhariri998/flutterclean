@@ -2,19 +2,23 @@ import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
 import 'package:shared_preferences/shared_preferences.dart';
+import 'package:connectivity_plus/connectivity_plus.dart';
+import 'screens/ratings.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
   SharedPreferences prefs = await SharedPreferences.getInstance();
   String? savedEmail = prefs.getString('user_email');
+  String? savedName = prefs.getString('user_full_name');
 
-  runApp(MyApp(initialEmail: savedEmail));
+  runApp(MyApp(initialEmail: savedEmail, initialName: savedName));
 }
 
 class MyApp extends StatelessWidget {
   final String? initialEmail;
+  final String? initialName;
 
-  const MyApp({Key? key, this.initialEmail}) : super(key: key);
+  const MyApp({Key? key, this.initialEmail, this.initialName}) : super(key: key);
 
   @override
   Widget build(BuildContext context) {
@@ -24,7 +28,7 @@ class MyApp extends StatelessWidget {
         primarySwatch: Colors.blue,
       ),
       home: initialEmail != null
-          ? AutoLoginCheck(email: initialEmail!)
+          ? AutoLoginCheck(email: initialEmail!, userName: initialName)
           : const EmailPage(),
     );
   }
@@ -32,8 +36,9 @@ class MyApp extends StatelessWidget {
 
 class AutoLoginCheck extends StatefulWidget {
   final String email;
+  final String? userName;
 
-  const AutoLoginCheck({Key? key, required this.email}) : super(key: key);
+  const AutoLoginCheck({Key? key, required this.email, this.userName}) : super(key: key);
 
   @override
   _AutoLoginCheckState createState() => _AutoLoginCheckState();
@@ -47,7 +52,14 @@ class _AutoLoginCheckState extends State<AutoLoginCheck> {
   }
 
   Future<void> _checkLogin() async {
-    // Simulate fetching the user data (optional - if needed before navigating)
+    var connectivityResult = await (Connectivity().checkConnectivity());
+    if (connectivityResult == ConnectivityResult.none) {
+      // No internet, directly navigate to profile page with saved data if available
+      _navigateToProfilePage();
+      return;
+    }
+
+    // If internet, proceed with fetching user details from the server
     var user = await fetchUser(widget.email);
     if (user == null) {
       // User not found or some error - go to email page
@@ -57,16 +69,19 @@ class _AutoLoginCheckState extends State<AutoLoginCheck> {
       );
     } else {
       // User is valid and we can navigate
-      Navigator.pushReplacement(
-        context,
-        MaterialPageRoute(builder: (_) => ProfilePage(email: widget.email)),
-      );
+      _navigateToProfilePage();
     }
   }
 
+  void _navigateToProfilePage() {
+    Navigator.pushReplacement(
+      context,
+      MaterialPageRoute(builder: (_) => ProfilePage(email: widget.email, userName: widget.userName ?? '')),
+    );
+  }
+
   Future<Map<String, dynamic>?> fetchUser(String email) async {
-    final String apiUrl =
-        "https://cleaning-app-sand.vercel.app/api/user?email=$email";
+    final String apiUrl = "https://cleaning-app-sand.vercel.app/api/user?email=$email";
     try {
       final response = await http.get(
         Uri.parse(apiUrl),
@@ -88,7 +103,6 @@ class _AutoLoginCheckState extends State<AutoLoginCheck> {
 
   @override
   Widget build(BuildContext context) {
-    // While checking show a loading indicator
     return const Scaffold(
       body: Center(
         child: CircularProgressIndicator(),
@@ -96,6 +110,7 @@ class _AutoLoginCheckState extends State<AutoLoginCheck> {
     );
   }
 }
+
 
 class EmailPage extends StatefulWidget {
   const EmailPage({Key? key}) : super(key: key);
@@ -111,6 +126,15 @@ class _EmailPageState extends State<EmailPage> {
   Future<Map<String, dynamic>?> fetchUser(String email) async {
     final String apiUrl =
         "https://cleaning-app-sand.vercel.app/api/user?email=$email";
+
+    var connectivityResult = await (Connectivity().checkConnectivity());
+    if (connectivityResult == ConnectivityResult.none) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+            content: Text('No internet connection.')),
+      );
+      return null;
+    }
     setState(() {
       _isLoading = true;
     });
@@ -160,7 +184,7 @@ class _EmailPageState extends State<EmailPage> {
         builder: (_) => NewPasswordPage(
           email: email,
           isNewUser: isNewUser,
-          onPasswordSet: () async {
+          onPasswordSet: (ctx) async {  // Add a BuildContext parameter here
             var updatedUser = await fetchUser(email);
             _handleUserAfterPasswordSet(context, updatedUser, email);
           },
@@ -200,13 +224,15 @@ class _EmailPageState extends State<EmailPage> {
       // Save user login
       SharedPreferences prefs = await SharedPreferences.getInstance();
       prefs.setString('user_email', email);
+      prefs.setString('user_full_name', updatedUser?['name']);
+
 
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('Login successful!')),
       );
       Navigator.pushAndRemoveUntil(
         context,
-        MaterialPageRoute(builder: (_) => ProfilePage(email: email)),
+        MaterialPageRoute(builder: (_) => ProfilePage(email: email, userName: updatedUser?['name'] ?? '',)),
             (route) => false,
       );
     }
@@ -318,7 +344,7 @@ class VerifyPasswordPage extends StatelessWidget {
 class NewPasswordPage extends StatelessWidget {
   final String email;
   final bool isNewUser;
-  final VoidCallback onPasswordSet;
+  final void Function(BuildContext) onPasswordSet;
 
   const NewPasswordPage({
     Key? key,
@@ -327,9 +353,17 @@ class NewPasswordPage extends StatelessWidget {
     required this.onPasswordSet,
   }) : super(key: key);
 
-  Future<bool> createOrUpdateUser(String email, String password) async {
+  Future<bool> createOrUpdateUser(String email, String password, BuildContext context) async {
     final String apiUrl = "https://cleaning-app-sand.vercel.app/api/userflutter";
     final Uri uri = Uri.parse(apiUrl);
+    var connectivityResult = await (Connectivity().checkConnectivity());
+    if (connectivityResult == ConnectivityResult.none) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+            content: Text('No internet connection.')),
+      );
+      return false;
+    }
     try {
       final http.Response response;
       if (isNewUser) {
@@ -383,12 +417,13 @@ class NewPasswordPage extends StatelessWidget {
               onPressed: () async {
                 String password = passwordController.text.trim();
                 if (password.length >= 6) {
-                  if (await createOrUpdateUser(email, password)) {
+                  if (await createOrUpdateUser(email, password, context)) {
+                    // Move ScaffoldMessenger inside onPressed
                     ScaffoldMessenger.of(context).showSnackBar(
                       const SnackBar(
                           content: Text('Password set successfully!')),
                     );
-                    onPasswordSet();
+                    onPasswordSet(context);
                   } else {
                     ScaffoldMessenger.of(context).showSnackBar(
                       const SnackBar(content: Text('Failed to set password.')),
@@ -411,6 +446,7 @@ class NewPasswordPage extends StatelessWidget {
   }
 }
 
+
 class UpdateNamePage extends StatefulWidget {
   final String email;
 
@@ -428,6 +464,14 @@ class _UpdateNamePageState extends State<UpdateNamePage> {
   Future<bool> updateUserName(
       String email, String firstName, String lastName) async {
     final String apiUrl = "https://cleaning-app-sand.vercel.app/api/user";
+    var connectivityResult = await (Connectivity().checkConnectivity());
+    if (connectivityResult == ConnectivityResult.none) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+            content: Text('No internet connection.')),
+      );
+      return false;
+    }
     setState(() {
       _isLoading = true;
     });
@@ -499,7 +543,7 @@ class _UpdateNamePageState extends State<UpdateNamePage> {
                           context,
                           MaterialPageRoute(
                               builder: (_) =>
-                                  ProfilePage(email: widget.email)),
+                                  ProfilePage(email: widget.email, userName: "$firstName $lastName" ,)),
                               (route) => false,
                         );
                       } else {
@@ -531,44 +575,36 @@ class _UpdateNamePageState extends State<UpdateNamePage> {
   }
 }
 
+
+
 class ProfilePage extends StatelessWidget {
   final String email;
+  final String userName;
 
-  const ProfilePage({Key? key, required this.email}) : super(key: key);
+  const ProfilePage({
+    Key? key,
+    required this.email,
+    required this.userName,
+  }) : super(key: key);
 
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
-      appBar: AppBar(title: const Text('Profile')),
-      body: Center(
-        child: Padding(
-          padding: const EdgeInsets.all(16.0),
-          child: Column(
-            mainAxisAlignment: MainAxisAlignment.center,
-            children: [
-              const Text('Welcome to your profile!',
-                  style: TextStyle(fontSize: 20)),
-              const SizedBox(height: 20),
-              Text('Email: $email', style: const TextStyle(fontSize: 16)),
-              const SizedBox(height: 20),
-              ElevatedButton(
-                onPressed: () async {
-                  SharedPreferences prefs =
-                  await SharedPreferences.getInstance();
-                  await prefs.remove('user_email');
-
-                  Navigator.pushAndRemoveUntil(
-                    context,
-                    MaterialPageRoute(builder: (_) => const EmailPage()),
-                        (route) => false,
-                  );
-                },
-                child: const Text('Sign Out'),
-              ),
-            ],
-          ),
-        ),
+    return MaterialApp(
+      title: 'Ratings App',
+      theme: ThemeData(
+        primarySwatch: Colors.purple,
+        scaffoldBackgroundColor: const Color(0xFFF7F7F7),
       ),
+      home: RatingsScreen(
+        userEmail: email,
+        userName: userName,
+      ),
+      routes: {
+        '/ratings': (context) => RatingsScreen(
+          userEmail: email,
+          userName: userName,
+        ),
+      },
     );
   }
 }
